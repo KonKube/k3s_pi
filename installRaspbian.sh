@@ -1,6 +1,6 @@
 #!/bin/bash
 # ./installRaspbian.sh k3s-master /dev/sdb Europe/Berlin sender@gmail recipient@gmail
-# ./installRaspbian.sh k3s-node-0 /dev/sdb Europe/Berlin sender@gmail recipient@gmail 192.168.1.100 TOKEN
+# ./installRaspbian.sh k3s-node-0 /dev/sdb Europe/Berlin sender@gmail recipient@gmail k3s-master TOKEN
 
 set -e
 set -o pipefail
@@ -10,7 +10,7 @@ FILESYSTEM=$2
 TIMEZONE=$3
 MAIL_SENDER=$4
 MAIL_RECIPIENT=$5
-K3S_MASTER_IP=$6
+MASTERDN=$6
 NODE_TOKEN=$7
 
 IMAGE=raspbian.img
@@ -110,19 +110,31 @@ if [[ -d $ROOT_FS_PATH ]]
 then
   if [[ -f ./wpa_supplicant.conf ]]
   then
-    echo "adding wpa_supplicant.conf to $ROOT_FS_PATH/etc/wpa_supplicant/wpa_supplicant.conf"
+    echo "adding wpa_supplicant.conf to /etc/wpa_supplicant/wpa_supplicant.conf"
     cat wpa_supplicant.conf | sudo tee -a $ROOT_FS_PATH/etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
   fi
 
-  echo "set hostname to $HOSTNAME"
-  echo $HOSTNAME | sudo tee $ROOT_FS_PATH/etc/hostname > /dev/null
+  if [[ ! -z "$HOSTNAME" ]]
+  then
+    echo "set hostname to $HOSTNAME"
+    echo $HOSTNAME | sudo tee $ROOT_FS_PATH/etc/hostname > /dev/null
+    echo "set hostname to localhost in /etc/hosts"
+    echo "127.0.1.1       $HOSTNAME" | sudo tee -a $ROOT_FS_PATH/etc/hosts
+  else
+    echo "could not set hostname to $HOSTNAME"
+    echo "could not set hostname to localhost in /etc/hosts"
+    exit 1
+  fi
 
-  echo "set hostname to localhost in /etc/hosts"
-  echo "127.0.1.1       $HOSTNAME" | sudo tee -a $ROOT_FS_PATH/etc/hosts
-
-  echo "set local time to $TIMEZONE"
-  sudo rm $ROOT_FS_PATH/etc/localtime
-  sudo cp $ROOT_FS_PATH/usr/share/zoneinfo/$TIMEZONE $ROOT_FS_PATH/etc/localtime
+  if [[ ! -z "$TIMEZONE" ]]
+  then
+    echo "set local time to $TIMEZONE"
+    sudo rm $ROOT_FS_PATH/etc/localtime
+    sudo cp $ROOT_FS_PATH/usr/share/zoneinfo/$TIMEZONE $ROOT_FS_PATH/etc/localtime
+  else
+    echo "could not set local time to $TIMEZONE"
+    exit 1
+  fi
 
   if [[ -f ~/.ssh/id_rsa.pub ]]
   then
@@ -131,7 +143,7 @@ then
     sudo sed -i 's/^UsePAM yes/UsePAM no/g' $ROOT_FS_PATH/etc/ssh/sshd_config
     if [[ ! -d "$ROOT_FS_PATH/home/pi/.ssh" ]]
     then
-      echo "creating $ROOT_FS_PATH/home/pi/.ssh directory"
+      echo "creating /home/pi/.ssh directory"
       sudo mkdir $ROOT_FS_PATH/home/pi/.ssh
       sudo chown 1000:1000 $ROOT_FS_PATH/home/pi/.ssh
     fi
@@ -142,16 +154,24 @@ then
   then
     echo "giving sudo privileges to user pi"
     echo "pi ALL=(ALL) NOPASSWD:ALL" | sudo tee -a $ROOT_FS_PATH/etc/sudoers > /dev/null
+  else
+    echo "could not find /etc/sudoers"
+    exit 1
   fi
 
   if [[ $HOSTNAME =~ "master" ]]
   then
     if [[ -f ./installMaster.sh ]]
     then
-      echo "adding installMaster.sh to $ROOT_FS_PATH/home/pi/installMaster.sh"
+      echo "adding installMaster.sh to /home/pi/installMaster.sh"
       cp ./installMaster.sh $ROOT_FS_PATH/home/pi/installMaster.sh
       sudo chmod 755 $ROOT_FS_PATH/home/pi/installMaster.sh
-      echo "@reboot ~/installMaster.sh $HOSTNAME $MAIL_SENDER"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+      if [[ -f ./.msmtprc && -f ./mail.sh && ! -z "$MAIL_RECIPIENT" ]]
+      then
+        echo "#@reboot ~/installMaster.sh $HOSTNAME $MAIL_RECIPIENT > ~/installMaster.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+      else
+        echo "#@reboot ~/installMaster.sh $HOSTNAME > ~/installMaster.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+      fi
       sudo chown 1000:crontab $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       sudo chmod 600 $ROOT_FS_PATH/var/spool/cron/crontabs/pi
     else
@@ -161,19 +181,17 @@ then
   then
     if [[ -f ./installNode.sh ]]
     then
-      echo "adding installNode.sh to $ROOT_FS_PATH/home/pi/installNode.sh"
+      echo "adding installNode.sh to /home/pi/installNode.sh"
       cp ./installNode.sh $ROOT_FS_PATH/home/pi/installNode.sh
       sudo chmod 755 $ROOT_FS_PATH/home/pi/installNode.sh
-      echo "@reboot ~/installNode.sh $HOSTNAME $MAIL_SENDER $NODE_TOKEN"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+      if [[ -f ./.msmtprc && -f ./mail.sh && ! -z "$MAIL_RECIPIENT" ]]
+      then
+        echo "#@reboot ~/installNode.sh $HOSTNAME $MASTERDN $NODE_TOKEN $MAIL_RECIPIENT > ~/installNode.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+      else
+        echo "#@reboot ~/installNode.sh $HOSTNAME $MASTERDN $NODE_TOKEN > ~/installNode.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+      fi
       sudo chown 1000:crontab $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       sudo chmod 600 $ROOT_FS_PATH/var/spool/cron/crontabs/pi
-      if [[ -v K3S_MASTER_IP ]]
-      then
-        echo "adding k3s-master to /etc/hosts with the IP $K3S_MASTER_IP"
-        echo "$K3S_MASTER_IP       k3s-master" | sudo tee -a $ROOT_FS_PATH/etc/hosts
-      else
-        echo "K3S_MASTER_IP value is missing"
-      fi
     else
       echo "./installNode.sh is missing"
     fi
@@ -182,15 +200,21 @@ then
     echo "wrong hostname. Must contain master or node to define the kubernetes cluster role"
   fi
 
-  if [[ -f ./ssmtp.conf && -f ./mail.sh && -v MAIL_RECIPIENT ]]
+  if [[ -f ./.msmtprc && -f ./mail.sh && ! -z "$MAIL_RECIPIENT" ]]
   then
-    echo "adding ssmtp.conf and mail.sh to $ROOT_FS_PATH/home/pi/"
-    cp ./ssmtp.conf $ROOT_FS_PATH/home/pi/ssmtp.conf
-    sudo chmod 755 $ROOT_FS_PATH/home/pi/ssmtp.conf
+    echo "adding .msmtprc and mail.sh to /home/pi/"
+    cp ./.msmtprc $ROOT_FS_PATH/home/pi/.msmtprc
+    sudo chmod 600 $ROOT_FS_PATH/home/pi/.msmtprc
     cp ./mail.sh $ROOT_FS_PATH/home/pi/mail.sh
     sudo chmod 755 $ROOT_FS_PATH/home/pi/mail.sh
+
+    echo "set up /etc/aliases and /etc/mail.rc"
+    echo "root: $MAIL_SENDER" | sudo tee -a $ROOT_FS_PATH/etc/aliases
+    echo "default: $MAIL_SENDER" | sudo tee -a $ROOT_FS_PATH/etc/aliases
+    echo 'set sendmail="/usr/bin/msmtp -t"' | sudo tee -a $ROOT_FS_PATH/etc/mail.rc
+
     echo "adding mail notification for reboots and daily heartbeats"
-    echo "@reboot ~/mail.sh $MAIL_RECIPIENT REBOOT-$HOSTNAME"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+    echo "@reboot sleep 30 && ~/mail.sh $MAIL_RECIPIENT REBOOT-$HOSTNAME"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
     echo "0 16 * * * ~/mail.sh $MAIL_RECIPIENT HEARTBEAT-$HOSTNAME"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
   fi
 else

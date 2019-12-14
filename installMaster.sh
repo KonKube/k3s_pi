@@ -3,17 +3,31 @@
 set -e
 
 HOSTNAME=$1
-MAIL_SENDER=$2
+MAIL_RECIPIENT=$2
 
 if [[ ! -f ~/initial.lock ]]
 then
 
   # initialize locales
+  echo "initialize locales"
+  export LANGUAGE=en_GB.UTF-8
+  export LANG=en_GB.UTF-8
+  export LC_ALL=en_GB.UTF-8
   sudo /usr/sbin/locale-gen en_GB.UTF-8
 
   # initial update and upgrade on first boot
   sudo apt-get update
   sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
+
+  if [[ -f ~/.msmtprc ]] && [[ -f ~/mail.sh ]]
+  then
+    # install email resources
+    echo "install msmtp and mailutils"
+    sudo apt-get -y install \
+      msmtp \
+      msmtp-mta \
+      mailutils
+  fi
 
   # disable swap
   sudo dphys-swapfile swapoff
@@ -31,18 +45,12 @@ then
   # configure master node role and node label
   #sudo kubectl taint nodes $HOSTNAME node-role.kubernetes.io/master=true:NoSchedule
 
-  if [[ -f ~/ssmtp.conf ]] && [[ -f ~/mail.sh ]]
-  then
-    # install email resources
-    sudo apt-get -y install \
-      ssmtp \
-      mailutils
-
-    sudo cp  ~/ssmtp.conf /etc/ssmtp/ssmtp.conf
-    echo "pi:$MAIL_SENDER:smtp.gmail.com:587" | sudo tee -a /etc/ssmtp/revaliases
-  fi
-
   # create initial.lock
+  echo "create initial.lock"
+  if [[ -f ~/.msmtprc ]] && [[ -f ~/mail.sh ]] && [[ ! -z "$MAIL_RECIPIENT" ]]
+  then
+    ~/mail.sh $MAIL_RECIPIENT InitialSetup-$HOSTNAME-Successful
+  fi
   touch ~/initial.lock
   sudo reboot now
 fi
