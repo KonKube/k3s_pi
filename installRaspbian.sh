@@ -1,6 +1,6 @@
 #!/bin/bash
 # ./installRaspbian.sh k3s-master /dev/sdb Europe/Berlin sender@gmail recipient@gmail
-# ./installRaspbian.sh k3s-node-0 /dev/sdb Europe/Berlin sender@gmail recipient@gmail k3s-master TOKEN
+# ./installRaspbian.sh k3s-node-0 /dev/sdb Europe/Berlin sender@gmail recipient@gmail k3s-master.lan TOKEN PARTITION_ID
 
 set -e
 set -o pipefail
@@ -10,8 +10,9 @@ FILESYSTEM=$2
 TIMEZONE=$3
 MAIL_SENDER=$4
 MAIL_RECIPIENT=$5
-MASTERDN=$6
+MASTER_ADDRESS=$6
 NODE_TOKEN=$7
+PARTITION_ID=$8
 
 IMAGE=raspbian.img
 ROOT_FS_PATH=/media/`whoami`/rootfs
@@ -117,7 +118,7 @@ then
   if [[ ! -z "$HOSTNAME" ]]
   then
     echo "set hostname to $HOSTNAME"
-    echo $HOSTNAME | sudo tee $ROOT_FS_PATH/etc/hostname > /dev/null
+    echo $HOSTNAME | sudo tee $ROOT_FS_PATH/etc/hostname
     echo "set hostname to localhost in /etc/hosts"
     echo "127.0.1.1       $HOSTNAME" | sudo tee -a $ROOT_FS_PATH/etc/hosts
   else
@@ -168,9 +169,9 @@ then
       sudo chmod 755 $ROOT_FS_PATH/home/pi/installMaster.sh
       if [[ -f ./.msmtprc && -f ./mail.sh && ! -z "$MAIL_RECIPIENT" ]]
       then
-        echo "#@reboot ~/installMaster.sh $HOSTNAME $MAIL_RECIPIENT > ~/installMaster.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+        echo "@reboot ~/installMaster.sh $HOSTNAME $MAIL_RECIPIENT > ~/installMaster.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       else
-        echo "#@reboot ~/installMaster.sh $HOSTNAME > ~/installMaster.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+        echo "@reboot ~/installMaster.sh $HOSTNAME > ~/installMaster.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       fi
       sudo chown 1000:crontab $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       sudo chmod 600 $ROOT_FS_PATH/var/spool/cron/crontabs/pi
@@ -186,9 +187,9 @@ then
       sudo chmod 755 $ROOT_FS_PATH/home/pi/installNode.sh
       if [[ -f ./.msmtprc && -f ./mail.sh && ! -z "$MAIL_RECIPIENT" ]]
       then
-        echo "#@reboot ~/installNode.sh $HOSTNAME $MASTERDN $NODE_TOKEN $MAIL_RECIPIENT > ~/installNode.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+        echo "@reboot ~/installNode.sh $HOSTNAME $MASTER_ADDRESS $NODE_TOKEN $MAIL_RECIPIENT > ~/installNode.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       else
-        echo "#@reboot ~/installNode.sh $HOSTNAME $MASTERDN $NODE_TOKEN > ~/installNode.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+        echo "@reboot ~/installNode.sh $HOSTNAME $MASTER_ADDRESS $NODE_TOKEN > ~/installNode.log 2>&1" | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       fi
       sudo chown 1000:crontab $ROOT_FS_PATH/var/spool/cron/crontabs/pi
       sudo chmod 600 $ROOT_FS_PATH/var/spool/cron/crontabs/pi
@@ -202,7 +203,7 @@ then
 
   if [[ -f ./.msmtprc && -f ./mail.sh && ! -z "$MAIL_RECIPIENT" ]]
   then
-    echo "adding .msmtprc and mail.sh to /home/pi/"
+    echo "add .msmtprc and mail.sh to /home/pi/"
     cp ./.msmtprc $ROOT_FS_PATH/home/pi/.msmtprc
     sudo chmod 600 $ROOT_FS_PATH/home/pi/.msmtprc
     cp ./mail.sh $ROOT_FS_PATH/home/pi/mail.sh
@@ -213,9 +214,17 @@ then
     echo "default: $MAIL_SENDER" | sudo tee -a $ROOT_FS_PATH/etc/aliases
     echo 'set sendmail="/usr/bin/msmtp -t"' | sudo tee -a $ROOT_FS_PATH/etc/mail.rc
 
-    echo "adding mail notification for reboots and daily heartbeats"
+    echo "add mail notification for reboots and daily heartbeats"
     echo "@reboot sleep 30 && ~/mail.sh $MAIL_RECIPIENT REBOOT-$HOSTNAME"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
     echo "0 16 * * * ~/mail.sh $MAIL_RECIPIENT HEARTBEAT-$HOSTNAME"  | sudo tee -a $ROOT_FS_PATH/var/spool/cron/crontabs/pi
+  fi
+
+  if [[ ! -z $PARTITION_ID ]]
+  then
+    echo "create /var/lib/rancher/k3s/storage directory"
+    mkdir -p $ROOT_FS_PATH/var/lib/rancher/k3s/storage
+    echo "add Filesystem to fstab"
+    echo "PARTUUID=$PARTITION_ID  /var/lib/rancher/k3s/storage   ext4   auto,nofail,sync,users,rw,exec   0   0" | sudo tee -a $ROOT_FS_PATH/etc/fstab
   fi
 else
   echo "could not find $ROOT_FS_PATH"

@@ -17,7 +17,19 @@ then
 
   # initial update and upgrade on first boot
   sudo apt-get update
+  sleep 5
   sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
+
+  if [[ ! $(uname -m) =~ "64" ]]
+  then
+    # enable 64-bit arch
+    echo "raspberry pi kernel update"
+    sudo SKIP_WARNING=1 rpi-update
+    echo "enable 64-bit arch"
+    echo "arm_64bit=1" | sudo tee -a /boot/config.txt
+    sudo reboot now
+    exit 1
+  fi
 
   if [[ -f ~/.msmtprc ]] && [[ -f ~/mail.sh ]]
   then
@@ -34,10 +46,10 @@ then
   sudo dphys-swapfile uninstall
   sudo systemctl disable dphys-swapfile
 
-  # install k3s
+  # install k3s with nodeport range from 1-32767
   curl -sfL https://get.k3s.io -o install.sh
   chmod 755 install.sh
-  ./install.sh server --kubelet-arg="address=0.0.0.0"
+  ./install.sh server --kube-apiserver-arg="service-node-port-range=1-32767" --kubelet-arg="address=0.0.0.0"
 
   # sleep for startup of k3s
   sleep 300
