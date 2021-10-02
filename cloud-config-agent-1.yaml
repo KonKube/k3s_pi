@@ -1,0 +1,54 @@
+#cloud-config
+
+## Set your hostname here, the manage_etc_hosts will update the hosts file entries as well
+hostname: k3s-agent-01
+manage_etc_hosts: true
+
+## Set the locale of the system
+locale: 'en_GB.UTF-8'
+
+## Set the timezone
+## Value of 'timezone' must exist in /usr/share/zoneinfo
+timezone: 'Europe/Berlin'
+
+apt_preserve_sources_list: true
+apt_update: true
+apt_upgrade: true
+
+users:
+  - name: oskar
+    primary-group: users
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users
+    ssh_import_id: None
+    lock_passwd: true
+    ssh_pwauth: false
+    ssh_authorized_keys:
+      - 'ssh-rsa AAAAB********************'
+
+write_files:
+  - path: /etc/netplan/50-cloud-init.yaml
+    permissions: '0644'
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: no
+            addresses:
+              - 192.168.2.32/24
+            gateway4: 192.168.2.1
+            nameservers:
+              addresses:
+                - 8.8.4.4
+                - 8.8.8.8
+
+runcmd:
+  - [ sudo, netplan, apply ]
+  - [ sudo, sed, -i, 's/PasswordAuthentication no/PasswordAuthentication yes/g', /etc/ssh/sshd_config ]
+  - [ sudo, systemctl, restart, sshd ]
+  - [ sudo, curl, -sfL, "https://get.k3s.io", -o, /root/k3s_install.sh ]
+  - [ sudo, chmod, "0755", /root/k3s_install.sh ]
+  - [ sudo, bash, /root/k3s_install.sh, agent, "--server=https://192.168.2.31:6443", --kubelet-arg=address=0.0.0.0, "--token=K**************************************************1" ]
+  - [ sudo, reboot, now ]
